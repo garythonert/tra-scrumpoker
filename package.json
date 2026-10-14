@@ -1,0 +1,10 @@
+{
+  "name": "trafineo-scrum-poker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Trafineo Scrum Poker – Live-Server (Node.js, WebSocket, SQLite)",
+  "main": "server.js",
+  "scripts": { "start": "node --disable-warning=ExperimentalWarning server.js" },
+  "engines": { "node": ">=22.13" },
+  "dependencies": { "ws": "^8.18.0" }
+}
