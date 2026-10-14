@@ -60,11 +60,23 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .bar{height:8px;border-radius:4px;background:var(--bg);border:1px solid var(--bd);overflow:hidden}.bar i{display:block;height:100%;background:var(--ac)}.bar.over i{background:var(--wa)}
 details{margin-top:10px}summary{cursor:pointer;color:var(--mu)}
 .mu{color:var(--mu);font-size:13px}label{font-size:13px;color:var(--mu)}
+body.live #newName,body.live #add,body.live #people .x{display:none}
+body.guest :is(#sprint,#cap,#stories,#newStory,#addStory,#bulk,#addBulk,#clearEst,#deckSel,#reveal,#reset,#result,#dNew,#dDup,#dDel,#edName,#edCards){pointer-events:none;opacity:.5}
 </style>
 </head>
 <body>
 <header><div id="head"></div></header>
 <main>
+
+<section>
+<h2>Live-Session</h2>
+<div id="liveOff">
+<div class="row" style="margin-top:0"><input id="myName" placeholder="Dein Name" maxlength="30"><input id="code" placeholder="Session-Code" maxlength="6" style="max-width:160px;text-transform:uppercase"></div>
+<div class="row"><button class="p" id="create">Neue Session starten</button><button id="join">Beitreten</button></div>
+<p class="mu" id="liveMsg" style="margin:8px 0 0">Ohne Session arbeitest du lokal (ein Gerät, reihum abstimmen). Live-Sessions gibt es nur auf der Server-Adresse.</p>
+</div>
+<div id="liveOn" hidden><span id="liveInfo"></span><div class="row"><button id="copyLink">Einladungslink kopieren</button><button id="leave">Session verlassen</button></div></div>
+</section>
 
 <section>
 <h2>Sprint</h2>
@@ -118,12 +130,13 @@ const PRE=[
  {id:'tsh',name:'T-Shirt-Größen',cards:'XS,S,M,L,XL,XXL,?,☕'.split(','),pre:1}];
 const SPECIAL=['?','☕'];
 let anim=false;
+let ws=null,LIVE=false,ISH=false,ME='',HOSTKEY='',SID='',remote=false;
 const KEY='planning-poker-v2';
 let S={deck:'fib',decks:[],names:[],votes:{},revealed:false,cur:null,stories:[],cs:null,sprint:'',cap:'',title:'Trafineo Scrum Poker 1.0',c1:null,c2:null,logo:null,mode:'auto'};
 try{const r=localStorage.getItem(KEY);if(r)S=Object.assign(S,JSON.parse(r))}catch(e){}
 if(!S.title||S.title==='Planning Poker')S.title='Trafineo Scrum Poker 1.0';
 const $=id=>document.getElementById(id);
-const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+const save=()=>{if(!LIVE){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}else if(ISH&&!remote)push()};
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const num=c=>c==='½'?.5:(/^\d+(\.\d+)?$/.test(c)?Number(c):null);
 const decks=()=>PRE.concat(S.decks);
@@ -163,7 +176,7 @@ function render(){
   $('cur').textContent=story?`Schätzung: ${story.t}`:'Schätzung – bitte Story auswählen';
   $('deckSel').innerHTML=decks().map(d=>`<option value="${d.id}" ${d.id===S.deck?'selected':''}>${esc(d.name)}</option>`).join('');
   $('people').innerHTML=S.names.length?S.names.map((n,i)=>`<span class="chip ${S.cur===i?'sel':''} ${S.votes[n]!==undefined?'done':''}" data-i="${i}">${esc(n)}<button class="x" data-del="${i}" title="Entfernen">✕</button></span>`).join(''):'<span class="mu">Füge Teilnehmer hinzu, um zu starten.</span>';
-  const who=S.cur!==null?S.names[S.cur]:null,d=dk();
+  const who=LIVE?(S.names.includes(ME)?ME:null):(S.cur!==null?S.names[S.cur]:null),d=dk();
   const can=who&&story&&!S.revealed;
   $('deck').innerHTML=d.cards.map(c=>`<button class="card ${who&&S.votes[who]===c&&!S.revealed?'on':''}" data-c="${esc(c)}" ${can?'':'disabled'}>${esc(c)}</button>`).join('');
   const st=S.revealed?stats():null;
@@ -192,7 +205,7 @@ function render(){
   save();
 }
 function syncEditor(){const d=dk();$('edName').value=d.name;$('edCards').value=d.cards.join(',');$('edName').disabled=$('edCards').disabled=!!d.pre;$('dDel').disabled=!!d.pre}
-function newRound(){S.votes={};S.revealed=false;S.cur=S.names.length?0:null}
+function newRound(){S.votes={};S.revealed=false;S.round=(S.round||0)+1;S.cur=S.names.length?0:null}
 function addStories(lines){lines.map(l=>l.trim()).filter(Boolean).forEach(t=>S.stories.push({t,est:null}));if(S.cs===null&&S.stories.length)S.cs=0}
 
 $('sprint').oninput=e=>{S.sprint=e.target.value;render()};
@@ -215,11 +228,13 @@ $('people').onclick=e=>{
   if(d!==undefined){delete S.votes[S.names[d]];S.names.splice(d,1);S.cur=S.names.length?0:null;return render()}
   const c=e.target.closest('.chip');if(c){S.cur=Number(c.dataset.i);render()}};
 $('deck').onclick=e=>{
-  const c=e.target.closest('.card');if(!c||S.cur===null)return;
+  const c=e.target.closest('.card');if(!c)return;
+  if(LIVE){if(S.revealed||!ws)return;S.votes[ME]=c.dataset.c;tx({t:'vote',card:c.dataset.c});remote=true;render();remote=false;return}
+  if(S.cur===null)return;
   S.votes[S.names[S.cur]]=c.dataset.c;
   const nx=S.names.findIndex(n=>S.votes[n]===undefined);
   if(nx>=0)S.cur=nx;render()};
-$('reveal').onclick=()=>{S.revealed=true;anim=true;render()};
+$('reveal').onclick=()=>{if(LIVE){if(ISH)tx({t:'patch',patch:Object.assign(shared(),{revealed:true})});return}S.revealed=true;anim=true;render()};
 $('reset').onclick=()=>{newRound();render()};
 $('result').onclick=e=>{
   if(e.target.id!=='accept'||S.cs===null)return;
@@ -247,6 +262,53 @@ $('logoDel').onclick=()=>{S.logo=null;$('logo').value='';render()};
 
 $('sprint').value=S.sprint;$('cap').value=S.cap;$('title').value=S.title;$('mode').value=S.mode;
 if(S.c1)$('c1').value=S.c1;if(S.c2)$('c2').value=S.c2;
+// ---- Live-Modus (WebSocket) ----
+const info=m=>{$('liveMsg').textContent=m};
+const tx=o=>{if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))};
+const shared=()=>({sprint:S.sprint,cap:S.cap,deck:S.deck,decks:S.decks,stories:S.stories,cs:S.cs,revealed:S.revealed,round:S.round||0});
+function push(){tx({t:'patch',patch:shared()})}
+function syncInputs(){
+  const a=document.activeElement.id;
+  if(a!=='sprint')$('sprint').value=S.sprint||'';
+  if(a!=='cap')$('cap').value=S.cap||'';
+  if(a!=='edName'&&a!=='edCards')syncEditor();
+}
+function onState(m){
+  const was=S.revealed,n=m.s;
+  LIVE=true;SID=m.sid;ISH=m.host;
+  if(!was&&n.revealed)anim=true;
+  Object.assign(S,n);S.cur=null;
+  document.body.classList.add('live');document.body.classList.toggle('guest',!ISH);
+  $('liveOff').hidden=true;$('liveOn').hidden=false;
+  $('liveInfo').innerHTML=`Session <b>${esc(SID)}</b> · du: <b>${esc(ME)}</b>${ISH?' (Host)':' (Teilnehmer)'}`;
+  syncInputs();
+  remote=true;try{render()}finally{remote=false}
+}
+function connect(first){
+  if(ws){ws.onclose=null;try{ws.close()}catch(e){}}
+  ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
+  ws.onopen=()=>ws.send(JSON.stringify(first));
+  ws.onerror=()=>{if(!LIVE)info('Server nicht erreichbar – Live-Modus gibt es nur auf der Server-Adresse.')};
+  ws.onmessage=e=>{
+    let m;try{m=JSON.parse(e.data)}catch(x){return}
+    if(m.t==='created'){SID=m.sid;HOSTKEY=m.hostKey;try{localStorage.setItem('poker-host-'+m.sid,m.hostKey)}catch(x){}}
+    else if(m.t==='error')info(m.msg);
+    else if(m.t==='state')onState(m)};
+  ws.onclose=()=>{if(LIVE){info('Verbindung getrennt – neuer Versuch …');setTimeout(()=>{if(LIVE)connect({t:'join',sid:SID,name:ME,hostKey:HOSTKEY})},2000)}};
+}
+function start(){const n=$('myName').value.trim();if(!n){info('Bitte Namen eingeben.');return false}ME=n;try{localStorage.setItem('poker-name',n)}catch(e){}return true}
+$('create').onclick=()=>{if(start())connect({t:'create',name:ME,patch:shared()})};
+$('join').onclick=()=>{
+  const sid=$('code').value.trim().toUpperCase();
+  if(!sid){info('Bitte Session-Code eingeben.');return}
+  if(!start())return;
+  SID=sid;try{HOSTKEY=localStorage.getItem('poker-host-'+sid)||''}catch(e){HOSTKEY=''}
+  connect({t:'join',sid,name:ME,hostKey:HOSTKEY})};
+$('copyLink').onclick=async()=>{const u=location.origin+location.pathname+'?s='+SID;try{await navigator.clipboard.writeText(u)}catch(e){prompt('Link kopieren:',u)}};
+$('leave').onclick=()=>{LIVE=false;if(ws)ws.close();location.reload()};
+try{$('myName').value=localStorage.getItem('poker-name')||''}catch(e){}
+{const q=new URLSearchParams(location.search).get('s');if(q)$('code').value=q.toUpperCase()}
+
 syncEditor();render();
 </script>
 </body>
